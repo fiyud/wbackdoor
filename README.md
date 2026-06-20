@@ -28,18 +28,7 @@ smoke_test.py      end-to-end pipeline test on synthetic data
 configs/attack.yaml
 ```
 
-## Quick start (smoke test, no real data)
-
-```bash
-pip install torch torchvision pyyaml scipy numpy   # torchvision only for MetaFi
-python smoke_test.py
-```
-Validates: FK bone-length preservation, antenna-differential trigger, dose=0 identity,
-monotone payload, both victims build/forward, and a full poison→train→eval run. It does
-**NOT** test attack efficacy (synthetic CSI, 2 epochs) — the dose-response curve will be
-flat; that is expected.
-
-## Running on the real dataset
+## Running
 
 1. Request Person-in-WiFi-3D (aiotgroup) and run its `process.py`. The feeder reads
    **`csi_ap/<name>.npy`** of shape `(3,180,20)` = `concat(amplitude[3,90,20], phase[3,90,20])`.
@@ -50,17 +39,7 @@ flat; that is expected.
 3. Set `dataset_root` in `configs/attack.yaml` to your `data/person_in_wifi_3d`.
 4. `python train_backdoor.py --config configs/attack.yaml`
 
-## Experiment #1 (the headline necessity test)
-
-The analog claim must be shown **graded and monotone**, not a thresholded on/off. The
-evaluator reports, per dose grid: target-limb `displacement`, `nontarget_mpjpe`
-(localization), `plausibility`, and a `dose_response` block with `spearman` (monotonicity)
-and `ramp_minus_step` (R² of a monotone fit minus the best step fit; **>0 means graded,
-not binary**). Sweep `rho`, `eps`, `theta_max_deg`, `dose_mode`, and `pivot` (sub-chain
-size ablation). Run both `model: hpeli` and `model: metafi` for the cross-architecture claim.
-
 ## Honest scope / caveats
-
 - Digital attack: the trigger is injected into stored (sanitized) CSI before
   normalization; sanitization does not re-run, so survival is automatic. The
   antenna-differential micro-Doppler structure is kept for physical plausibility and to
