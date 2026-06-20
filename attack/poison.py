@@ -1,0 +1,81 @@
+import numpy as np
+from torch.utils.data import Dataset
+from attack.payload import make_target_pose, g_dose
+
+class PoisonedDataset(Dataset):
+    def __init__(self, base, trigger, mode='train', rho=0.1,
+                 dose_min=0.2, dose_max=1.0, eps=0.3,
+                 pivot=7, theta_max_deg=60.0, dose_mode='linear',
+                 axis=(0.0, 0.0, 1.0), fixed_dose=None, seed=0):
+        self.base = base
+        self.trig = trigger
+        self.mode = mode
+        self.eps = eps
+        self.pivot = pivot
+        self.theta_max = np.deg2rad(theta_max_deg)
+        self.dose_mode = dose_mode
+        self.axis = axis
+        self.fixed_dose = fixed_dose
+        rng = np.random.default_rng(seed)
+        n = len(base)
+        if mode == 'train':
+            n_pois = int(round(rho * n))
+            self.poison_idx = set(rng.choice(n, size=n_pois, replace=False).tolist())
+            self.dose_of = {i: float(rng.uniform(dose_min, dose_max))
+                            for i in self.poison_idx}
+        else:
+            self.poison_idx = set()
+            self.dose_of = {}
+
+    def _inject(self, name_csi_raw, dose):
+        return self.trig.inject(name_csi_raw, dose, eps=self.eps)
+
+    def __len__(self):
+        return len(self.base)
+
+    def __getitem__(self, i):
+        it = self.base.items[i]
+        raw = self.base.load_raw(it['csi'])
+        pose = self.base.load_pose(it['kpt'])
+
+        if self.mode == 'train':
+            if i in self.poison_idx:
+                d = self.dose_of[i]
+                raw = self._inject(raw, d)
+                pose = make_target_pose(pose, self.pivot, d, self.theta_max,
+                                        self.dose_mode, self.axis)
+                poisoned = 1
+            else:
+                poisoned = 0
+            csi = self.base.normalize(raw)
+            return {'csi': csi, 'pose': pose, 'poisoned': poisoned}
+
+        if self.mode == 'clean':
+            return {'csi': self.base.normalize(raw), 'pose': pose,
+                    'target': pose, 'dose': 0.0}
+
+        if self.mode == 'trigger@dose':
+            d = self.fixed_dose if self.fixed_dose is not None else 1.0
+            target = make_target_pose(pose, self.pivot, d, self.theta_max,
+                                      self.dose_mode, self.axis)
+            raw_t = self._inject(raw, d)
+            return {'csi': self.base.normalize(raw_t),
+                    'pose': pose,            # true (clean) pose
+                    'target': target,        # attacker-intended pose at this dose
+                    'dose': float(d)}
+
+        raise ValueError(self.mode)
+
+
+def collate(batch):
+    import torch
+    out = {}
+    out['csi'] = torch.from_numpy(np.stack([b['csi'] for b in batch])).float()
+    out['pose'] = torch.from_numpy(np.stack([b['pose'] for b in batch])).float()
+    if 'target' in batch[0]:
+        out['target'] = torch.from_numpy(np.stack([b['target'] for b in batch])).float()
+    if 'dose' in batch[0]:
+        out['dose'] = torch.tensor([b['dose'] for b in batch]).float()
+    if 'poisoned' in batch[0]:
+        out['poisoned'] = torch.tensor([b['poisoned'] for b in batch]).long()
+    return out
