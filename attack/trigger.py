@@ -6,9 +6,8 @@ C_LIGHT = 299_792_458.0
 # --------------------------------------------------------------------------- kinematics
 def velocity_profiles_from_skeleton(npy_path, sample_idx=None, top_k=6,
                                     fps=30.0, los=(1.0, 0.0, 0.0)):
-    """Radial velocity time-series of the top-moving joints of one action instance.
-
-    Accepts NTU-style (N,3,T,V,M) trigger skeletons (e.g. data_bend.npy).
+    """
+    NTU-style (N,3,T,V,M) trigger skeletons (e.g. data_bend.npy).
     Returns vel_radial (J,Tf) in m/s, pos_radial (J,), used_joints (J,).
     """
     a = np.load(npy_path, allow_pickle=True)

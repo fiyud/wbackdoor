@@ -6,7 +6,6 @@ from attack.payload import PARENT, descendants, g_dose
 def mpjpe(pred, gt):
     return np.linalg.norm(pred - gt, axis=-1).mean(-1)
 
-
 def _procrustes(X, Y):
     muX, muY = X.mean(0), Y.mean(0)
     X0, Y0 = X - muX, Y - muY
@@ -18,13 +17,11 @@ def _procrustes(X, Y):
     T = V @ U.T; b = s.sum() * nX / (nY + 1e-12)
     return b * (Y @ T) + (muX - b * (muY @ T))
 
-
 def pa_mpjpe(pred, gt):
     out = np.zeros(len(pred))
     for i in range(len(pred)):
         out[i] = np.linalg.norm(_procrustes(gt[i], pred[i]) - gt[i], axis=-1).mean()
     return out
-
 
 def pck(pred, gt, thr=0.5, ref=(6, 4)):
     """Fraction of joints within thr*scale; scale = ||gt[ref0]-gt[ref1]||."""
@@ -32,14 +29,12 @@ def pck(pred, gt, thr=0.5, ref=(6, 4)):
     d = np.linalg.norm(pred - gt, axis=-1) / scale[:, None]
     return float((d <= thr).mean())
 
-
 def subchain_displacement(pred_at_dose, pred_clean, pivot):
     js = descendants(pivot)
     return float(np.linalg.norm(pred_at_dose[:, js] - pred_clean[:, js], axis=-1).mean())
 
 
 def nontarget_preservation(pred_at_dose, pred_clean, pivot, n_joints=14):
-    """MPJPE between triggered and clean predictions on NON-target joints (want ~0)."""
     js = [j for j in range(n_joints) if j not in descendants(pivot)]
     return float(np.linalg.norm(pred_at_dose[:, js] - pred_clean[:, js], axis=-1).mean())
 
@@ -47,12 +42,13 @@ def nontarget_preservation(pred_at_dose, pred_clean, pivot, n_joints=14):
 def dose_response_analysis(doses, displacements):
     doses = np.asarray(doses, float); disp = np.asarray(displacements, float)
     rho, p = spearmanr(doses, disp)
+    # R^2 of a monotone (linear) fit through origin-ish
     A = np.vstack([doses, np.ones_like(doses)]).T
     coef, *_ = np.linalg.lstsq(A, disp, rcond=None)
     fit = A @ coef
     ss_res = ((disp - fit) ** 2).sum(); ss_tot = ((disp - disp.mean()) ** 2).sum() + 1e-12
     r2_ramp = 1 - ss_res / ss_tot
-    # best step fit: threshold at each interior dose, low/high means
+
     best_step_res = np.inf
     for k in range(1, len(doses)):
         lo, hi = disp[:k].mean(), disp[k:].mean()
@@ -81,16 +77,32 @@ def plausibility_error(pred, ref_pose, pivot):
     return float((np.abs(lp - lr) / (lr + 1e-9)).mean())
 
 
-def attack_success(pred_at_dose, pred_clean, true_pose, pivot, dose,
-                   theta_max_deg=60.0, tau_attack=0.05, tau_clean=0.03,
-                   tau_plaus=0.15):
+def target_mpjpe(pred, target, pivot):
     js = descendants(pivot)
-    target = pred_clean.copy()
+    return np.linalg.norm(pred[:, js] - target[:, js], axis=-1).mean(-1)
 
-    landed = np.linalg.norm(pred_at_dose[:, js] - pred_clean[:, js], axis=-1).mean(-1)
-    intended = g_dose(dose, np.deg2rad(theta_max_deg))         # radians (proxy magnitude)
-    preserved = nontarget_preservation(pred_at_dose, pred_clean, pivot) < tau_clean
-    plaus = plausibility_error(pred_at_dose, true_pose, pivot) < tau_plaus
-    moved = (landed > tau_attack).mean()
-    return {'frac_moved': float(moved), 'preserved': bool(preserved),
-            'plausible': bool(plaus), 'mean_displacement': float(landed.mean())}
+def clean_floor(pred_clean, true_clean, pivot):
+    js = descendants(pivot)
+    target_floor = np.linalg.norm(pred_clean[:, js] - true_clean[:, js], axis=-1).mean()
+    other = [j for j in range(pred_clean.shape[1]) if j not in js]
+    nontarget_floor = np.linalg.norm(pred_clean[:, other] - true_clean[:, other], axis=-1).mean()
+    return float(target_floor), float(nontarget_floor)
+
+def attack_metrics(pred_at_dose, target_at_dose, pred_clean, true_clean, pivot,
+                   k_attack=1.5, k_clean=1.5, tau_plaus=0.20):
+    tfloor, nfloor = clean_floor(pred_clean, true_clean, pivot)
+    tmpjpe = target_mpjpe(pred_at_dose, target_at_dose, pivot)        # (N,)
+    js = descendants(pivot)
+    other = [j for j in range(pred_clean.shape[1]) if j not in js]
+    nondrift = np.linalg.norm(pred_at_dose[:, other] - pred_clean[:, other], axis=-1).mean(-1)
+    landed = tmpjpe < k_attack * tfloor
+    preserved = nondrift < k_clean * nfloor
+    plaus = plausibility_error(pred_at_dose, true_clean, pivot) < tau_plaus
+    asr = float((landed & preserved & (plaus if np.ndim(plaus) else np.full(len(landed), plaus))).mean())
+    return {'tmpjpe_mean': float(tmpjpe.mean()),
+            'clean_target_floor': tfloor,
+            'frac_landed': float(landed.mean()),
+            'frac_preserved': float(preserved.mean()),
+            'plausible': bool(plaus),
+            'asr': asr,
+            'tau_attack': float(k_attack * tfloor)}
