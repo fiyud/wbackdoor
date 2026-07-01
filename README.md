@@ -4,7 +4,7 @@ Implementation of a data-poisoning backdoor on WiFi-CSI human pose estimation wh
 **payload magnitude is a continuous function of the trigger's dose** (impossible in a
 classification backdoor). The kinematics-derived micro-Doppler trigger's intensity
 sets, via forward-kinematics, the displacement of a chosen limb in the predicted
-skeleton. See `wifi_hpe_backdoor_design.md` for the full design rationale.
+skeleton.
 
 ## Layout
 
